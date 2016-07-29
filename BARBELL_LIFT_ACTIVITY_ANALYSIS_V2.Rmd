@@ -1,0 +1,136 @@
+---
+title: "Prediction Analysis for Human Activity (Barbell Lifting)"
+author: Donald Fernandes
+output: 
+  html_document: 
+    keep_md: TRUE
+---
+  
+##SYNOPSIS 
+This report is a prediction analysis for Barbell Lifting human activity, using dataset provided by HAR 
+[here](http://groupware.les.inf.puc-rio.br/har). The objective is to predict as accurately as possible, one of the five possible activities as below:
+1. exactly according to the specification (Class A)  
+2. throwing the elbows to the front (Class B)  
+3. lifting the dumbbell only halfway (Class C)  
+4. lowering the dumbbell only halfway (Class D)  
+5. throwing the hips to the front (Class E)  
+
+The following sections describe Data Exploration, Variable Selection, Model Building, Cross Validation, Sampling Error and actual Testing.
+
+
+******************************************************************  
+******************************************************************
+##EXPLORATORY DATA ANALYSIS
+Setup the R Environment by Installing and Loading the libraries listed above.  
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+library(knitr)
+library(R.utils)
+library(caret)
+library(rpart)
+library(klaR)
+library(doParallel)  
+library(ggplot2)
+```
+Load and check the structures of the data sets. 
+```{r, echo=TRUE, message=FALSE, warning=FALSE, results="hide"}
+setwd("C:/Donald/Personal/Coursera/Data Science Specialization/Course8_Practical Machine Learning/Project/Data")
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+str(training)
+str(testing)
+```
+It is observed that there are 158 possible variables related to the outcome "classe". The next section attempts to clean up the datasets, so that only relevant feature Variables are left for further prediction analysis. 
+  
+******************************************************************
+******************************************************************   
+##VARIABLE EXTRACTION AND SELECTION
+We carefully observe that the Training data set is a mix of summarized rows and detailed rows. 
+We first seperate out the summarized and detailed rows, from the training data set.
+Since Training and Testing data sets have to be in the same dimensions for Prediction Modelling, we exclude the summarized rows from further analysis.
+Then exclude the columns which have either NA or blank values.
+Then retain only the variables which represent actual measurements.
+As a side-note, I will not prefer to do a Co-relation analysis, because almost all remaining 52 variables (excluding the "classe" column) are actual measurements.
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+training_dtl    <- subset(training, new_window=="no") 
+training_sum    <- subset(training, new_window=="yes") 
+training_dtl    <- training_dtl[!sapply(training_dtl, function (x) all(is.na(x) | x == ""))]
+cols.dont.want  <- c("X", "user_name", "raw_timestamp_part_1",
+                     "raw_timestamp_part_2","new_window","num_window",
+                     "cvtd_timestamp")
+training_dtl    <- training_dtl[, ! names(training_dtl) %in% cols.dont.want, drop = F]
+
+```
+As seen above, we are now left with 52 Predictor Variables, excluding the outcome.
+  
+  
+******************************************************************
+******************************************************************   
+##CROSS VALIDATION AND MODEL BUILDING
+We use the K-Fold method (8 Folds, 20 times in Parallel mode) to generate a Trained model. The model is based on Random Forest method for Prediction, because of the high number of observations and relatively high number of independent variables. The number of trees is limited to 100, to give a reasonable tradeoff between computing speed and prediction accuracy.
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+##K-Fold
+registerDoParallel(4)
+
+train_control<- trainControl(method="cv", 
+                             number=8,savePredictions = "final", repeats=20, 
+                             allowParallel = TRUE)
+modelrf<- train(classe~., data=training_dtl, trControl=train_control, method="rf", ntree=100)
+
+registerDoParallel(1)
+
+pretraining     <- predict(modelrf,training_dtl)
+confusionMatrix <- confusionMatrix(training_dtl$classe,pretraining)
+confusionMatrix$overall["Accuracy"]
+
+```
+Model accuracy is `r confusionMatrix$overall["Accuracy"]`, which is quite acceptable and we proceed on to do some more graphical analysis.
+Please note that depending on your computing power, the above code may take between 2 to 20 minutes to execute.
+  
+##GRAPHICAL ANALYSIS
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+
+print(plot(varImp(modelrf),20))
+
+plot(modelrf$finalModel)
+
+plot(modelrf)
+
+
+```
+  
+Observations from the above plots:  
+- High Level of average Accuracy for all Predictors  
+- Error Rate is concentrated in the first 10% of the trees only, which contributes to high level of Accuracy. 
+- Roll_Belt and Yaw_Belt own the highest relative Importance amongst Predictor Variables.
+  
+ 
+******************************************************************
+******************************************************************   
+##MODEL APPLICATION AND FINAL TESTING   
+Prepare the Testing Dataset to match with the pre-processed Training dataset, and apply the Training Model on the Testing dataset.
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+
+testing    <- testing[!sapply(testing, function (x) all(is.na(x) | x == ""))]
+cols.dont.want  <- c("X", "user_name", "raw_timestamp_part_1",
+                     "raw_timestamp_part_2","new_window","num_window",
+                     "cvtd_timestamp")
+testing    <- testing[, ! names(testing) %in% cols.dont.want, drop = F]
+
+pretesting     <- predict(modelrf,testing)
+pre_classe <- as.vector(predict(modelrf, testing))
+```  
+  
+  
+Plot the results for each of the 20 Test Observations
+```{r, echo=TRUE, message=FALSE, warning=FALSE}
+testing <- cbind(testing, pre_classe)
+qplot(testing$problem_id, testing$pre_classe )
+
+```  
+  
+Conclusion: `r sum(testing$pre_classe=='A') ` Observations from the Testing Dataset are predicted to adhere to the Human Activity performed to specification.  
+  
+  
+******************************************************************
+******************************************************************   
+ 
